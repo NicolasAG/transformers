@@ -22,6 +22,7 @@ using a masked language modeling (MLM) loss. XLNet is fine-tuned using a permuta
 
 import logging
 import math
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Optional
@@ -96,6 +97,10 @@ class DataTrainingArguments:
         metadata={"help": "Whether distinct lines of text in the dataset are to be handled as distinct sequences."},
     )
 
+    patience: int = field(
+        default=-1, metadata={"help": "Number of epochs to try to reduce validation loss"}
+    )
+
     mlm: bool = field(
         default=False, metadata={"help": "Train with masked-language modeling loss instead of language modeling."}
     )
@@ -143,6 +148,30 @@ def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
+    if data_args.patience > 0:
+        early_stop = True
+        patience = data_args.patience
+        training_args.do_train = True
+        training_args.do_eval = True
+        if training_args.num_train_epochs != 1:
+            raise ValueError(
+                f"Early stopping (patience={data_args.patience}) is not"
+                f" allowed if num_train_epochs ({training_args.num_train_epochs}) != 1"
+            )
+        if data_args.train_data_file is None:
+            raise ValueError(
+                "Cannot do training without a training data file. Either supply a file to --train_data_file "
+                f"or set patience ({data_args.patience}) to -1"
+            )
+        if data_args.eval_data_file is None:
+            raise ValueError(
+                "Cannot do evaluation without an evaluation data file. Either supply a file to --eval_data_file "
+                f"or set patience ({data_args.patience}) to -1"
+            )
+    else:
+        early_stop = False
+        patience = 1  # set to >0 just to be able to run train loop at least once if needed.
+
     if data_args.eval_data_file is None and training_args.do_eval:
         raise ValueError(
             "Cannot do evaluation without an evaluation data file. Either supply a file to --eval_data_file "
@@ -155,9 +184,11 @@ def main():
         and training_args.do_train
         and not training_args.overwrite_output_dir
     ):
-        raise ValueError(
-            f"Output directory ({training_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
-        )
+        logger.info(f"Output dir ({training_args.output_dir}) is not empty, will try to reload from there.")
+        model_args.model_name_or_path = training_args.output_dir
+        # raise ValueError(
+        #     f"Output directory ({training_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
+        # )
 
     # Setup logging
     logging.basicConfig(
@@ -213,6 +244,20 @@ def main():
         logger.info("Training new model from scratch")
         model = AutoModelWithLMHead.from_config(config)
 
+    # ADD special tokens
+    tokenizer.pad_token = tokenizer.eos_token
+    special_tokens_dict = {'additional_special_tokens': ['<STORY>', '<QUERY>', '<PROOF>', '<ANSWER>']}
+    num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
+    print('We have added', num_added_toks, 'tokens')
+    '''
+    if tokenizer.pad_token_id is None and data_args.line_by_line:
+        # See PR 3388. Some tokenizers don't had pad tokens which causes errors at the encoding step in the collate_fn.
+        # We give here the option to force the addition of a pad token. The attention mask is used to ignore this token
+        # when feeding to the model.
+        # tokenizer.pad_token = tokenizer.eos_token
+        num_added_toks = tokenizer.add_special_tokens({"pad_token": "<pad>"})
+    '''
+
     model.resize_token_embeddings(len(tokenizer))
 
     if config.model_type in ["bert", "roberta", "distilbert", "camembert"] and not data_args.mlm:
@@ -250,39 +295,75 @@ def main():
         prediction_loss_only=True,
     )
 
-    # Training
-    if training_args.do_train:
-        model_path = (
-            model_args.model_name_or_path
-            if model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path)
-            else None
-        )
-        trainer.train(model_path=model_path)
-        trainer.save_model()
-        # For convenience, we also re-save the tokenizer to the same directory,
-        # so that you can share your model easily on huggingface.co/models =)
-        if trainer.is_world_master():
-            tokenizer.save_pretrained(training_args.output_dir)
+    # load results from file or create from scratch
+    output_eval_file = os.path.join(training_args.output_dir, "results_lm.json")
+    if os.path.isfile(output_eval_file):
+        with open(output_eval_file, "r") as f:
+            results = json.load(f)
+    else:
+        results = {
+            "best_valid_loss": math.inf,
+            "patience": patience,
+            "epoch": 0,
+        }
+    while results["patience"] > 0:
 
-    # Evaluation
-    results = {}
-    if training_args.do_eval:
-        logger.info("*** Evaluate ***")
+        # Training
+        if training_args.do_train:
+            logger.info(f"*** EPOCH {results['epoch']} ***")
 
-        eval_output = trainer.evaluate()
+            model_path = (
+                model_args.model_name_or_path
+                if model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path)
+                else None
+            )
+            trainer.train(model_path=model_path, )
 
-        perplexity = math.exp(eval_output["eval_loss"])
-        result = {"perplexity": perplexity}
+            # save the model now if we don't early stop
+            if not early_stop:
+                trainer.save_model()
+                # For convenience, we also re-save the tokenizer to the same directory,
+                # so that you can share your model easily on huggingface.co/models =)
+                if trainer.is_world_master():
+                    tokenizer.save_pretrained(training_args.output_dir)
 
-        output_eval_file = os.path.join(training_args.output_dir, "eval_results_lm.txt")
+        # Evaluation
+        if training_args.do_eval:
+            logger.info("*** Evaluate ***")
+
+            eval_output = trainer.evaluate()
+
+            results["valid_loss"] = eval_output["eval_loss"]
+            results["valid_ppl"] = math.exp(eval_output["eval_loss"])
+            if results["valid_loss"] < results["best_valid_loss"]:
+                logger.info(f"new loss ({results['valid_loss']}) < best loss ({results['best_valid_loss']})")
+                logger.info(f"set patience back to {data_args.patience} and saving model.")
+                results["best_valid_loss"] = results["valid_loss"]
+                results["best_valid_ppl"] = results["valid_ppl"]
+                results["patience"] = data_args.patience
+                # save the model & tokenizer
+                trainer.save_model()
+                if trainer.is_world_master():
+                    tokenizer.save_pretrained(training_args.output_dir)
+            else:
+                logger.info(f"new loss ({results['valid_loss']}) >= best loss ({results['best_valid_loss']})")
+                results["patience"] -= 1
+                logger.info(f"set patience to {results['patience']}")
+
+        results["epoch"] += 1
+
+        # save results
+
         if trainer.is_world_master():
             with open(output_eval_file, "w") as writer:
-                logger.info("***** Eval results *****")
-                for key in sorted(result.keys()):
-                    logger.info("  %s = %s", key, str(result[key]))
-                    writer.write("%s = %s\n" % (key, str(result[key])))
+                logger.info("***** Results *****")
+                for key in sorted(results.keys()):
+                    logger.info("  %s = %s", key, str(results[key]))
+                    # writer.write("%s = %s\n" % (key, str(results[key])))
+                json.dump(results, writer)
 
-        results.update(result)
+        if not early_stop:
+            break
 
     return results
 
