@@ -61,9 +61,9 @@ eai job submit \
     "
 eai job log -f --last
 '
-try=12
+try=7
 
-for m1 in "np" # "sp" "spr" # "lp" "lpr"
+for m1 in "sp" "spr" # "lp" "lpr" # "np"
 do
   for m2 in "facts" # "amt"
   do
@@ -84,18 +84,22 @@ do
                       --output_dir=/hf_transformers/examples/language-modeling/models/${m1}-${m2}-anon \
                       --model_type=gpt2 \
                       --model_name_or_path=gpt2 \
-                      --patience=20 \
-                      --num_train_epochs=1 \
                       --do_train \
                       --train_data_file=/hf_transformers/data/${m1}-${m2}-anon[train].txt \
-                      --do_eval \
                       --eval_data_file=/hf_transformers/data/${m1}-${m2}-anon[valid].txt \
-                      --save_total_limit=1 \
+                      --evaluate_during_training \
+                      --patience=20 \
+                      --save_total_limit=22\
+                      --num_train_epochs=999 \
+                      --save_steps=540 \
+                      --eval_steps=540 \
+                      --logging_steps=540 \
                       --per_device_train_batch_size=8 \
                       --per_device_eval_batch_size=8 \
                       --gradient_accumulation_steps=16 \
                       --line_by_line \
-                      --dataloader_drop_last
+                      --dataloader_drop_last \
+                      --prediction_loss_only
     "
   done
 done
