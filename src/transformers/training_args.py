@@ -134,6 +134,15 @@ class TrainingArguments:
     evaluate_during_training: bool = field(
         default=False, metadata={"help": "Run evaluation during training at each logging step."},
     )
+    patience: int = field(
+        default=-1,
+        metadata={
+            "help": (
+                "If >0: stops trainin after evaluating this many times consecutively with non-decreasing loss."
+                "Requires evaluate_during_training."
+            )
+        },
+    )
     prediction_loss_only: bool = field(
         default=False, metadata={"help": "When performing evaluation and predictions, only returns the loss."},
     )

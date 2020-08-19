@@ -96,11 +96,6 @@ class DataTrainingArguments:
         default=False,
         metadata={"help": "Whether distinct lines of text in the dataset are to be handled as distinct sequences."},
     )
-
-    patience: int = field(
-        default=-1, metadata={"help": "Number of epochs to try to reduce validation loss"}
-    )
-
     mlm: bool = field(
         default=False, metadata={"help": "Train with masked-language modeling loss instead of language modeling."}
     )
@@ -147,30 +142,6 @@ def main():
 
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-
-    if data_args.patience > 0:
-        early_stop = True
-        patience = data_args.patience
-        training_args.do_train = True
-        training_args.do_eval = True
-        if training_args.num_train_epochs != 1:
-            raise ValueError(
-                f"Early stopping (patience={data_args.patience}) is not"
-                f" allowed if num_train_epochs ({training_args.num_train_epochs}) != 1"
-            )
-        if data_args.train_data_file is None:
-            raise ValueError(
-                "Cannot do training without a training data file. Either supply a file to --train_data_file "
-                f"or set patience ({data_args.patience}) to -1"
-            )
-        if data_args.eval_data_file is None:
-            raise ValueError(
-                "Cannot do evaluation without an evaluation data file. Either supply a file to --eval_data_file "
-                f"or set patience ({data_args.patience}) to -1"
-            )
-    else:
-        early_stop = False
-        patience = 1  # set to >0 just to be able to run train loop at least once if needed.
 
     if data_args.eval_data_file is None and training_args.do_eval:
         raise ValueError(
@@ -267,15 +238,17 @@ def main():
         )
 
     if data_args.block_size <= 0:
-        data_args.block_size = tokenizer.max_len
+        data_args.block_size = tokenizer.model_max_length
         # Our input block size will be the max possible for the model
     else:
-        data_args.block_size = min(data_args.block_size, tokenizer.max_len)
+        data_args.block_size = min(data_args.block_size, tokenizer.model_max_length)
 
     # Get datasets
 
     train_dataset = get_dataset(data_args, tokenizer=tokenizer) if training_args.do_train else None
-    eval_dataset = get_dataset(data_args, tokenizer=tokenizer, evaluate=True) if training_args.do_eval else None
+    eval_dataset = get_dataset(data_args, tokenizer=tokenizer, evaluate=True) if (
+            training_args.do_eval or training_args.evaluate_during_training
+    ) else None
     if config.model_type == "xlnet":
         data_collator = DataCollatorForPermutationLanguageModeling(
             tokenizer=tokenizer, plm_probability=data_args.plm_probability, max_span_length=data_args.max_span_length,
@@ -292,78 +265,35 @@ def main():
         data_collator=data_collator,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        prediction_loss_only=True,
     )
 
-    # load results from file or create from scratch
-    output_eval_file = os.path.join(training_args.output_dir, "results_lm.json")
-    if os.path.isfile(output_eval_file):
-        with open(output_eval_file, "r") as f:
-            results = json.load(f)
-    else:
-        results = {
-            "best_valid_loss": math.inf,
-            "patience": patience,
-            "epoch": 0,
-        }
-    while results["patience"] > 0:
+    results = {}
+    # Training
+    if training_args.do_train:
+        model_path = (
+            model_args.model_name_or_path
+            if model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path)
+            else None
+        )
+        logger.info(f"model_path: {model_path}")
+        train_results = trainer.train(model_path=model_path, )
+        results["train_step"] = train_results.global_step
+        results["train_loss"] = train_results.training_loss
+        results["train_ppl"] = math.exp(train_results.training_loss)
 
-        # Training
-        if training_args.do_train:
-            logger.info(f"*** EPOCH {results['epoch']} ***")
-
-            model_path = (
-                model_args.model_name_or_path
-                if model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path)
-                else None
-            )
-            trainer.train(model_path=model_path, )
-
-            # save the model now if we don't early stop
-            if not early_stop:
-                trainer.save_model()
-                # For convenience, we also re-save the tokenizer to the same directory,
-                # so that you can share your model easily on huggingface.co/models =)
-                if trainer.is_world_master():
-                    tokenizer.save_pretrained(training_args.output_dir)
-
-        # Evaluation
-        if training_args.do_eval:
-            logger.info("*** Evaluate ***")
-
-            eval_output = trainer.evaluate()
-
-            results["valid_loss"] = eval_output["eval_loss"]
-            results["valid_ppl"] = math.exp(eval_output["eval_loss"])
-            if results["valid_loss"] < results["best_valid_loss"]:
-                logger.info(f"new loss ({results['valid_loss']}) < best loss ({results['best_valid_loss']})")
-                logger.info(f"set patience back to {data_args.patience} and saving model.")
-                results["best_valid_loss"] = results["valid_loss"]
-                results["best_valid_ppl"] = results["valid_ppl"]
-                results["patience"] = data_args.patience
-                # save the model & tokenizer
-                trainer.save_model()
-                if trainer.is_world_master():
-                    tokenizer.save_pretrained(training_args.output_dir)
-            else:
-                logger.info(f"new loss ({results['valid_loss']}) >= best loss ({results['best_valid_loss']})")
-                results["patience"] -= 1
-                logger.info(f"set patience to {results['patience']}")
-
-        results["epoch"] += 1
-
-        # save results
-
+        trainer.save_model()
+        # For convenience, we also re-save the tokenizer to the same directory,
+        # so that you can share your model easily on huggingface.co/models =)
         if trainer.is_world_master():
-            with open(output_eval_file, "w") as writer:
-                logger.info("***** Results *****")
-                for key in sorted(results.keys()):
-                    logger.info("  %s = %s", key, str(results[key]))
-                    # writer.write("%s = %s\n" % (key, str(results[key])))
-                json.dump(results, writer)
+            tokenizer.save_pretrained(training_args.output_dir)
 
-        if not early_stop:
-            break
+    # Evaluation
+    if training_args.do_eval:
+        logger.info("*** Evaluate ***")
+
+        eval_output = trainer.evaluate()
+        results["valid_loss"] = eval_output["eval_loss"]
+        results["valid_ppl"] = math.exp(eval_output["eval_loss"])
 
     return results
 

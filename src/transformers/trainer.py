@@ -177,6 +177,8 @@ class Trainer:
     ):
         self.model = model.to(args.device)
         self.args = args
+        if self.args.patience > 0 and not self.args.evaluate_during_training:
+            raise ValueError("Patience requires evaluate_during_training.")
         self.data_collator = data_collator if data_collator is not None else default_data_collator
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
@@ -528,6 +530,9 @@ class Trainer:
 
         tr_loss = 0.0
         logging_loss = 0.0
+        patience_best_eval_loss = None
+        patience_evals_without_improvement = 0
+        patience_should_stop = False
         model.zero_grad()
         train_iterator = trange(
             epochs_trained, int(num_train_epochs), desc="Epoch", disable=not self.is_local_process_zero()
@@ -599,7 +604,23 @@ class Trainer:
                         self.log(logs)
 
                     if self.args.evaluate_during_training and self.global_step % self.args.eval_steps == 0:
-                        self.evaluate()
+                        results = self.evaluate()
+                        if self.args.patience > 0:
+                            # Keep track of best loss to determine if we should stop early
+                            patience_eval_loss = results["eval_loss"]
+                            if not patience_best_eval_loss or patience_eval_loss < patience_best_eval_loss:
+                                patience_evals_without_improvement = 0
+                                patience_best_eval_loss = patience_eval_loss
+                                logger.info(f"Improved validation loss at step {self.global_step}")
+                            else:
+                                patience_evals_without_improvement += 1
+                                if patience_evals_without_improvement >= self.args.patience:
+                                    patience_should_stop = True
+                                    logger.info(
+                                        f"Patience threshold ({self.args.patience}) exceeded, stopping training"
+                                    )
+                                else:
+                                    logger.info(f"Evaluations without improvement: {patience_evals_without_improvement}")
 
                     if self.args.save_steps > 0 and self.global_step % self.args.save_steps == 0:
                         # In all cases (even distributed/parallel), self.model is always a reference
@@ -611,12 +632,15 @@ class Trainer:
                         else:
                             assert model is self.model, f"Model {model} should be a reference to self.model"
                         # Save model checkpoint
-                        output_dir = os.path.join(self.args.output_dir, f"{PREFIX_CHECKPOINT_DIR}-{self.global_step}")
+                        if self.args.patience > 0 and patience_evals_without_improvement == 0:
+                            output_dir = os.path.join(self.args.output_dir, f"{PREFIX_CHECKPOINT_DIR}-{self.global_step}_best")
+                        else:
+                            output_dir = os.path.join(self.args.output_dir, f"{PREFIX_CHECKPOINT_DIR}-{self.global_step}")
 
                         self.save_model(output_dir)
 
                         if self.is_world_process_zero():
-                            self._rotate_checkpoints()
+                            self._rotate_checkpoints(use_mtime=True)
 
                         if is_torch_tpu_available():
                             xm.rendezvous("saving_optimizer_states")
@@ -626,10 +650,12 @@ class Trainer:
                             torch.save(self.optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
                             torch.save(self.lr_scheduler.state_dict(), os.path.join(output_dir, "scheduler.pt"))
 
-                if self.args.max_steps > 0 and self.global_step > self.args.max_steps:
+                if ((self.args.max_steps > 0 and self.global_step > self.args.max_steps) or
+                        patience_should_stop):
                     epoch_iterator.close()
                     break
-            if self.args.max_steps > 0 and self.global_step > self.args.max_steps:
+            if ((self.args.max_steps > 0 and self.global_step > self.args.max_steps) or
+                    patience_should_stop):
                 train_iterator.close()
                 break
             if self.args.tpu_metrics_debug or self.args.debug:
@@ -702,7 +728,9 @@ class Trainer:
         if iterator is not None:
             iterator.write(output)
         else:
+            print("")
             print(output)
+            print("")
 
     def _prepare_inputs(
         self, inputs: Dict[str, Union[torch.Tensor, Any]], model: nn.Module
