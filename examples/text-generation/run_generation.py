@@ -20,6 +20,8 @@
 
 import argparse
 import logging
+import re
+import os
 
 import numpy as np
 import torch
@@ -222,12 +224,26 @@ def main():
     else:
         prefix = None
 
+    # reload from where we left of if possible
+    if args.out_file and os.path.isfile(args.out_file):
+        with open(args.out_file, 'r') as f:
+            output_lines = f.readlines()
+        print(f"found {len(output_lines)} generated lines in {args.out_file}, will continue from here.")
+    else:
+        output_lines = []
+
     with open(args.prompt, 'r') as f:
         prompt_lines = f.readlines()
-    output_lines = []
+
     for idx, prompt_text in enumerate(prompt_lines):
+        if idx < len(output_lines):
+            continue
         if idx % 1000 == 0:
-            print(f"processing lines {idx}-{idx+1000} / {len(prompt_lines)}...")
+            if args.out_file and len(output_lines) > 0:
+                print(f"writing {len(output_lines)} lines to {args.out_file}...")
+                with open(args.out_file, 'w') as f:
+                    f.writelines(output_lines)
+            print(f"processing lines {idx}-{idx + 1000} / {len(prompt_lines)}...")
 
         # prompt_text = args.prompt if args.prompt else input("Model prompt >>> ")
         prompt_text = prompt_text.split("<PROOF>")[0]  # take story+question
@@ -235,9 +251,9 @@ def main():
         if prefix:                                     # add prefix if specified
             prompt_text = prefix + ' ' + args.stop_token + ' ' + prompt_text
 
-        #print("=======================================================")
-        #print("will generate for this prompt:")
-        #print(prompt_text)
+        # print("=======================================================")
+        # print("will generate for this prompt:")
+        # print(prompt_text)
 
         # Different models need different input formatting and/or extra arguments
         requires_preprocessing = args.model_type in PREPROCESSING_FUNCTIONS.keys()
@@ -255,7 +271,10 @@ def main():
             )
         else:
             encoded_prompt = tokenizer.encode(prompt_text, add_special_tokens=False, return_tensors="pt")
+
         encoded_prompt = encoded_prompt.to(args.device)
+        # print(f"prompt_text length: {len(prompt_text.split())}")
+        # print(f"encoded_prompt size: {encoded_prompt.size()}")
 
         if encoded_prompt.size()[-1] == 0:
             input_ids = None
@@ -284,20 +303,41 @@ def main():
         generated_sequence = generated_sequence.tolist()
 
         # Decode text
-        text = tokenizer.decode(generated_sequence, clean_up_tokenization_spaces=True)
+        text = tokenizer.decode(generated_sequence, clean_up_tokenization_spaces=False)
 
-        #print("")
-        #print(text)
+        # print("text:")
+        # print(text)
 
         # Remove prompt from decoded text
-        text = text[len(tokenizer.decode(encoded_prompt[0], clean_up_tokenization_spaces=True)):]
+        text = text[len(tokenizer.decode(encoded_prompt[0], clean_up_tokenization_spaces=False)):]
 
         # Remove all text after the stop token
         text = text[: text.find(args.stop_token) if args.stop_token else None]
+        # Take the first <ANSWER> and forget the rest
+        text = text.split('<ANSWER>')
+        if len(text) == 1:
+            # if couldn't generate the end of answer ...
+            print(f"couldn't generate the <ANSWER> token in '{text[0]}'")
+            text = re.split('<[A-Z]+>', text[0])[0].replace('\n', '') + '. . .'
+            print(f"stop here: {text}")
+        else:
+            # Now, also make sure we generated at least 1 sentence after the <ANSWER> tag.
+            tmp = text[1].split('.')
+            if len(tmp) == 1:
+                # splitting around '.' may not always work... sometimes the model doesn't generate a '.'
+                # so also split around TAGS
+                tmp = re.split('<[A-Z]+>', tmp[0])
+            if len(tmp) == 1:
+                print(f"generated the <ANSWER> tag but no end-of-sentence in '{tmp[0]}'")
+                text = text[0] + "<ANSWER>" + tmp[0].replace('\n', '') + ". . ."
+                print(f"stop here: {text}")
+            else:
+                # if we did generate the full sentence, then return this.
+                text = text[0] + "<ANSWER>" + tmp[0].replace('\n', '') + '.'
 
         # Add the prompt at the beginning of the sequence. Remove the excess text that was used for pre-processing
         total_sequence = (
-                prompt_text + ' ' + text
+                prompt_text + text
         )
         total_sequence = total_sequence.replace("\n", "")  # remove new lines within the sequence
         total_sequence = total_sequence + '\n'             # add a new line at the end of the sequence
@@ -305,7 +345,8 @@ def main():
         if prefix:  # remove prefix if specified
             total_sequence = total_sequence.replace(prefix + ' ' + args.stop_token + ' ', '')
 
-            print(f"without prefix: `{total_sequence}`")
+        # print("total_sequence:")
+        # print(total_sequence)
 
         output_lines.append(total_sequence)
 

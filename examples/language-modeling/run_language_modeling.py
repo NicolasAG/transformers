@@ -22,7 +22,6 @@ using a masked language modeling (MLM) loss. XLNet is fine-tuned using a permuta
 
 import logging
 import math
-import json
 import os
 from dataclasses import dataclass, field
 from typing import Optional
@@ -218,6 +217,7 @@ def main():
     # ADD special tokens
     tokenizer.pad_token = tokenizer.eos_token
     special_tokens_dict = {'additional_special_tokens': ['<STORY>', '<QUERY>', '<PROOF>', '<ANSWER>']}
+    # NOTE: should also have added "ent_1", "ent_2", ..., "ent_20" :/
     num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
     print('We have added', num_added_toks, 'tokens')
     '''
@@ -294,6 +294,14 @@ def main():
         eval_output = trainer.evaluate()
         results["valid_loss"] = eval_output["eval_loss"]
         results["valid_ppl"] = math.exp(eval_output["eval_loss"])
+
+    output_eval_file = os.path.join(training_args.output_dir, "results_lm.txt")
+    if trainer.is_world_master():
+        with open(output_eval_file, "w") as writer:
+            logger.info("***** results *****")
+            for key in sorted(results.keys()):
+                logger.info("  %s = %s", key, str(results[key]))
+                writer.write("%s = %s\n" % (key, str(results[key])))
 
     return results
 

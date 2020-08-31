@@ -20,34 +20,43 @@ do
 done
 echo "done. now submitting job..."
 
-try=3
-checkpoint="3500"
+try=1
 
-for m1 in "sp" "lp" "np" # "spr" "lpr"
+for m1 in "spr" # "sp" # "lp" "lpr" "np"
 do
-  if [ $m1 == "sp" ] || [ $m1 == "spr" ]
+  if [ $m1 == "sp" ]
   then
     mode="short"
-  elif [ $m1 == "lp" ] || [ $m1 == "lpr" ]
+    checkpoint="17280"
+  elif [ $m1 == "spr" ]
+  then
+    mode="short"
+    checkpoint="17820"
+  elif [ $m1 == "lp" ]
   then
     mode="long"
+    checkpoint="28080"
+  elif [ $m1 == "lpr" ]
+  then
+    mode="long"
+    checkpoint="unknown"
   else
     mode="no"
+    checkpoint="14580"
   fi
   for m2 in "facts" # "amt"
   do
-    for i in 3 4 5 6 7 8 9 10 # 2
+    for i in 2 3 4 5 6 7 8 9 10
     do
       if [ $m1 == "np" ] || [ $i == 2 ] || [ $i == 3 ] || [ $i == 4 ]
       then
         ml=256
-      elif [ $i == 5 ] || [ $i == 6 ] || [ $i == 7 ]
-      then
-        ml=512   # may raise IndexError due to GPT2 having only 1024 positional token embeddings
       else
-        ml=1024  # will raise IndexError due to GPT2 having only 1024 positional token embeddings
+        ml=512   # may raise IndexError due to GPT2 having only 1024 positional token embeddings
+        # ml=1024  # will raise IndexError due to GPT2 having only 1024 positional token embeddings
       fi
       # STRAWMAN GPT2
+      : '
       eai job submit \
           --image registry.console.elementai.com/$ACCOUNT_ID/allennlp \
           --data $ORG_NAME.$ACCOUNT_NAME.data_clutrr1:/clutrr \
@@ -71,27 +80,25 @@ do
                         --p=0.9 \
                         --out_file=/clutrr/1.${i}_test/hf-gpt2-pure_${mode}-proof_${m2}.txt
           "
+      '
       # FORWARD PROOFS
       : '
       eai job submit \
           --image registry.console.elementai.com/$ACCOUNT_ID/allennlp \
           --data $ORG_NAME.$ACCOUNT_NAME.data_clutrr1:/clutrr \
+          --data $ORG_NAME.$ACCOUNT_NAME.models_gpt2:/models \
           --data $ORG_NAME.$ACCOUNT_NAME.$eai_code:/hf_transformers \
           --cpu 1 \
           --mem 8 \
           --gpu 1 \
           --gpu-mem 6 \
-          --name ""\
           --name "generate_test_1o${i}_${m1}_${m2}_hfgpt2_${checkpoint}_try${try}" \
           --restartable \
-          -- bash -c "cd hf_transformers \
-                      && pip install . --no-warn-script-location \
-                      && pip install -r ./examples/requirements.txt --no-warn-script-location \
-                      && cd ./examples/text-generation \
+          -- bash -c "cd hf_transformers/examples/text-generation \
                       && python run_generation.py \
                         --model_type=gpt2 \
-                        --model_name_or_path=../language-modeling/model/${m1}-${m2}-anon_+10/checkpoint-${checkpoint}/ \
-                        --prompt=/clutrr/1.${i}_test/${mode}_proof_1.2_test_${m2}_ANON.txt \
+                        --model_name_or_path=/models/clutrr/1_${mode}-proof_${m2}_2_4_6/hf-gpt_anon/checkpoint-${checkpoint}_best/ \
+                        --prompt=/clutrr/1.${i}_test/${mode}_proof_1.${i}_test_${m2}_ANON.txt \
                         --length=${ml} \
                         --temperature=0.7 \
                         --k=30 \
@@ -100,36 +107,33 @@ do
           "
       '
       # BACKWARD PROOFS
-      : '
       eai job submit \
           --image registry.console.elementai.com/$ACCOUNT_ID/allennlp \
           --data $ORG_NAME.$ACCOUNT_NAME.data_clutrr1_rev:/clutrr \
+          --data $ORG_NAME.$ACCOUNT_NAME.models_gpt2:/models \
           --data $ORG_NAME.$ACCOUNT_NAME.$eai_code:/hf_transformers \
           --cpu 1 \
           --mem 8 \
           --gpu 1 \
           --gpu-mem 6 \
           --name ""\
-          --name "generate_test_1o${i}_${m1}_${m2}_hf-gpt2_try${try}" \
+          --name "generate_test_1o${i}_${m1}_${m2}_hfgpt2_${checkpoint}_try${try}" \
           --restartable \
-          -- bash -c "cd hf_transformers \
-                      && pip install . --no-warn-script-location \
-                      && pip install -r ./examples/requirements.txt --no-warn-script-location \
-                      && cd ./examples/text-generation \
+          -- bash -c "cd hf_transformers/examples/text-generation \
                       && python run_generation.py \
-                          --model_type=gpt2 \
-                          --model_name_or_path=../language-modeling/model/${m1}-${m2}-anon_+10 \
-                          --prompt=/clutrr/1.${i}_test/${mode}_proof_1.2_test_${m2}_ANON.txt \
-                          --length=${ml} \
-                          --temperature=0.7 \
-                          --k=30 \
-                          --p=0.9 \
-                          --out_file=/clutrr/1.${i}_test/hf-gpt2_anon_${mode}-proof-rev_${m2}.txt
+                        --model_type=gpt2 \
+                        --model_name_or_path=/models/clutrr/1_${mode}-proof-rev_${m2}_2_4_6/hf-gpt_anon/checkpoint-${checkpoint}_best/ \
+                        --prompt=/clutrr/1.${i}_test/${mode}_proof_1.${i}_test_${m2}_ANON.txt \
+                        --length=${ml} \
+                        --temperature=0.7 \
+                        --k=30 \
+                        --p=0.9 \
+                        --out_file=/clutrr/1.${i}_test/hf-gpt2_anon@${checkpoint}_${mode}-proof_${m2}.txt
           "
-      '
       done
   done
 done
+#eai job log -f --last
 
 # && pip install . --no-warn-script-location \
 # && pip install -r ./examples/requirements.txt --no-warn-script-location \

@@ -61,27 +61,42 @@ eai job submit \
     "
 eai job log -f --last
 '
-try=7
+try=15
 
-for m1 in "sp" "spr" # "lp" "lpr" # "np"
+for m1 in "lpr" # "lp" # "np" "sp" "spr"
 do
+  if [ $m1 == "sp" ]
+  then
+    mode="short-proof"
+  elif [ $m1 == "spr" ]
+  then
+    mode="short-proof-rev"
+  elif [ $m1 == "lp" ]
+  then
+    mode="long-proof"
+  elif [ $m1 == "lpr" ]
+  then
+    mode="long-proof-rev"
+  else
+    mode="no-proof"
+  fi
   for m2 in "facts" # "amt"
   do
     eai job submit \
     --image registry.console.elementai.com/$ACCOUNT_ID/allennlp \
     --data $ORG_NAME.$ACCOUNT_NAME.$eai_code:/hf_transformers \
-    --cpu 6 \
+    --data $ORG_NAME.$ACCOUNT_NAME.models_gpt2:/models \
+    --cpu 8 \
     --mem 64 \
     --gpu 4 \
     --gpu-mem 32 \
     --name "finetune_hf_gpt2_${m1}_${m2}_anon_try${try}" \
     --restartable \
     -- bash -c "cd hf_transformers \
-                && pip install . --no-warn-script-location \
                 && pip install -r ./examples/requirements.txt --no-warn-script-location \
                 && cd examples/language-modeling \
                 && python run_language_modeling.py \
-                      --output_dir=/hf_transformers/examples/language-modeling/models/${m1}-${m2}-anon \
+                      --output_dir=/models/clutrr/1_${mode}_${m2}_2_4_6/hf-gpt_anon \
                       --model_type=gpt2 \
                       --model_name_or_path=gpt2 \
                       --do_train \
@@ -89,13 +104,13 @@ do
                       --eval_data_file=/hf_transformers/data/${m1}-${m2}-anon[valid].txt \
                       --evaluate_during_training \
                       --patience=20 \
-                      --save_total_limit=22\
+                      --save_total_limit=22 \
                       --num_train_epochs=999 \
-                      --save_steps=540 \
-                      --eval_steps=540 \
-                      --logging_steps=540 \
-                      --per_device_train_batch_size=8 \
-                      --per_device_eval_batch_size=8 \
+                      --save_steps=1080 \
+                      --eval_steps=1080 \
+                      --logging_steps=1080 \
+                      --per_device_train_batch_size=4 \
+                      --per_device_eval_batch_size=4 \
                       --gradient_accumulation_steps=16 \
                       --line_by_line \
                       --dataloader_drop_last \
@@ -103,5 +118,14 @@ do
     "
   done
 done
+
+# && pip install . --no-warn-script-location \
+
+# PARAMS FOR 'np' 'sp' 'spr'  ||  'lp' 'lpr'
+#--save_steps=540             || 1080
+#--eval_steps=540             || 1080
+#--logging_steps=540          || 1080
+#--batch_size=16              || 4
+#--accumlation_Steps=8        || 16
 
 eai job log -f --last
