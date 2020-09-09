@@ -780,6 +780,7 @@ class Trainer:
                         output_dir = os.path.join(self.args.output_dir, checkpoint_folder)
 
                         self.save_model(output_dir)
+                        self.save_model(self.args.output_dir)  # also save in parent folder
 
                         if self.is_world_process_zero():
                             self._rotate_checkpoints(use_mtime=True)
@@ -791,6 +792,9 @@ class Trainer:
                         elif self.is_world_process_zero():
                             torch.save(self.optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
                             torch.save(self.lr_scheduler.state_dict(), os.path.join(output_dir, "scheduler.pt"))
+                            # also save in parent folder
+                            torch.save(self.optimizer.state_dict(), os.path.join(self.args.output_dir, "optimizer.pt"))
+                            torch.save(self.lr_scheduler.state_dict(), os.path.join(self.args.output_dir, "scheduler.pt"))
 
                 epoch_pbar.update(1)
                 if ((self.args.max_steps > 0 and self.global_step >= self.args.max_steps) or
