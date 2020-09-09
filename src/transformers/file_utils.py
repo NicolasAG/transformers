@@ -154,7 +154,8 @@ def is_torch_tpu_available():
 
 
 def is_nlp_available():
-    return _nlp_available
+    # return _nlp_available
+    return False  # bcs nlp.Dataset is not defined but used in Trainer! :o :(
 
 
 def is_psutil_available():
