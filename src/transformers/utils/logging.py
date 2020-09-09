@@ -50,6 +50,8 @@ def _configure_library_root_logger() -> None:
             # This library has already configured the library root logger.
             return
         _default_handler = logging.StreamHandler()  # Set sys.stderr as stream.
+        _formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s -   %(message)s')
+        _default_handler.setFormatter(_formatter)
 
         # Apply our default configuration to the library root logger.
         library_root_logger = _get_library_root_logger()
