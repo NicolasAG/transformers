@@ -22,7 +22,7 @@ echo "done. now submitting job..."
 
 try=1
 
-for m1 in "spr" # "sp" # "lp" "lpr" "np"
+for m1 in "lp" # "spr" "sp" "lp" "lpr" "np"
 do
   if [ $m1 == "sp" ]
   then
@@ -82,7 +82,6 @@ do
           "
       '
       # FORWARD PROOFS
-      : '
       eai job submit \
           --image registry.console.elementai.com/$ACCOUNT_ID/allennlp \
           --data $ORG_NAME.$ACCOUNT_NAME.data_clutrr1:/clutrr \
@@ -103,10 +102,10 @@ do
                         --temperature=0.7 \
                         --k=30 \
                         --p=0.9 \
-                        --out_file=/clutrr/1.${i}_test/hf-gpt2_anon@${checkpoint}_${mode}-proof_${m2}.txt
+                        --out_file=/clutrr/1.${i}_test/hf-gpt2_anon_${mode}-proof_${m2}.txt
           "
-      '
       # BACKWARD PROOFS
+      : '
       eai job submit \
           --image registry.console.elementai.com/$ACCOUNT_ID/allennlp \
           --data $ORG_NAME.$ACCOUNT_NAME.data_clutrr1_rev:/clutrr \
@@ -130,6 +129,7 @@ do
                         --p=0.9 \
                         --out_file=/clutrr/1.${i}_test/hf-gpt2_anon@${checkpoint}_${mode}-proof_${m2}.txt
           "
+      '
       done
   done
 done

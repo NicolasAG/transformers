@@ -13,7 +13,7 @@ do
   else
     afile=${context_folder}/np
   fi
-  for m2 in "facts" "amt"
+  for m2 in "amt" # "facts" "amt"
   do
     cat /clutrr/1.2345678910_train/${m1}_proof_1.2_train_${m2}_anon.txt.4000 > ${afile}-${m2}-anon[train].txt
     cat /clutrr/1.2345678910_train/${m1}_proof_1.4_train_${m2}_anon.txt.4000 >> ${afile}-${m2}-anon[train].txt
@@ -37,7 +37,7 @@ do
   else
     afile=${context_folder}/lpr
   fi
-  for m2 in "facts" "amt"
+  for m2 in "amt" # "facts" "amt"
   do
     cat /clutrr_rev/1.2345678910_train/${m1}_proof_1.2_train_${m2}_anon.txt.4000 > ${afile}-${m2}-anon[train].txt
     cat /clutrr_rev/1.2345678910_train/${m1}_proof_1.4_train_${m2}_anon.txt.4000 >> ${afile}-${m2}-anon[train].txt
