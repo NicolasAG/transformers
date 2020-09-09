@@ -63,7 +63,7 @@ MODEL_CLASSES = {
 # Padding text to help Transformer-XL and XLNet with short prompts as proposed by Aman Rusia
 # in https://github.com/rusiaaman/XLNet-gen#methodology
 # and https://medium.com/@amanrusia/xlnet-speaks-comparison-to-gpt-2-ea1a4e9ba39e
-PADDING_TEXT = """In 1991, the remains of Russian Tsar Nicholas II and his family
+PREFIX = """In 1991, the remains of Russian Tsar Nicholas II and his family
 (except for Alexei and Maria) are discovered.
 The voice of Nicholas's young son, Tsarevich Alexei Nikolaevich, narrates the
 remainder of the story. 1883 Western Siberia,
@@ -124,12 +124,14 @@ def prepare_xlm_input(args, model, tokenizer, prompt_text):
 
 
 def prepare_xlnet_input(args, _, tokenizer, prompt_text):
-    prompt_text = (args.padding_text if args.padding_text else PADDING_TEXT) + prompt_text
+    prefix = args.prefix if args.prefix else args.padding_text if args.padding_text else PREFIX
+    prompt_text = prefix + prompt_text
     return prompt_text
 
 
 def prepare_transfoxl_input(args, _, tokenizer, prompt_text):
-    prompt_text = (args.padding_text if args.padding_text else PADDING_TEXT) + prompt_text
+    prefix = args.prefix if args.prefix else args.padding_text if args.padding_text else PREFIX
+    prompt_text = prefix + prompt_text
     return prompt_text
 
 
@@ -186,7 +188,8 @@ def main():
     parser.add_argument("--k", type=int, default=0)
     parser.add_argument("--p", type=float, default=0.9)
 
-    parser.add_argument("--padding_text", type=str, default="", help="Padding text for Transfo-XL and XLNet.")
+    parser.add_argument("--prefix", type=str, default="", help="Text added prior to input.")
+    parser.add_argument("--padding_text", type=str, default="", help="Deprecated, the use of `--prefix` is preferred.")
     parser.add_argument("--xlm_language", type=str, default="", help="Optional language when used with the XLM model.")
 
     parser.add_argument("--seed", type=int, default=42, help="random seed for initialization")
