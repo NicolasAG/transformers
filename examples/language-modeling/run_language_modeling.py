@@ -26,6 +26,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
+
 from transformers import (
     CONFIG_MAPPING,
     MODEL_WITH_LM_HEAD_MAPPING,
@@ -41,8 +42,8 @@ from transformers import (
     Trainer,
     TrainingArguments,
     set_seed,
+    logging as hf_logging,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,14 @@ def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
+    # Setup logging
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO if training_args.local_rank in [-1, 0] else logging.WARN,
+    )
+    hf_logging.set_verbosity_info()
+
     if data_args.eval_data_file is None and training_args.do_eval:
         raise ValueError(
             "Cannot do evaluation without an evaluation data file. Either supply a file to --eval_data_file "
@@ -160,12 +169,6 @@ def main():
         #     f"Output directory ({training_args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
         # )
 
-    # Setup logging
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO if training_args.local_rank in [-1, 0] else logging.WARN,
-    )
     logger.warning(
         "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",
         training_args.local_rank,
@@ -214,12 +217,18 @@ def main():
         logger.info("Training new model from scratch")
         model = AutoModelWithLMHead.from_config(config)
 
+    logger.info(model)
+    num_params = sum(p.numel() for p in model.parameters())
+    logger.info('Model has %d parameters' % num_params)
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info('Model has %d trainable parameters' % num_params)
+
     # ADD special tokens
     tokenizer.pad_token = tokenizer.eos_token
     special_tokens_dict = {'additional_special_tokens': ['<STORY>', '<QUERY>', '<PROOF>', '<ANSWER>']}
     # NOTE: should also have added "ent_1", "ent_2", ..., "ent_20" :/
     num_added_toks = tokenizer.add_special_tokens(special_tokens_dict)
-    print('We have added', num_added_toks, 'tokens')
+    logger.info(f'We have added {num_added_toks} tokens')
     '''
     if tokenizer.pad_token_id is None and data_args.line_by_line:
         # See PR 3388. Some tokenizers don't had pad tokens which causes errors at the encoding step in the collate_fn.
@@ -244,7 +253,6 @@ def main():
         data_args.block_size = min(data_args.block_size, tokenizer.model_max_length)
 
     # Get datasets
-
     train_dataset = get_dataset(data_args, tokenizer=tokenizer) if training_args.do_train else None
     eval_dataset = get_dataset(data_args, tokenizer=tokenizer, evaluate=True) if (
             training_args.do_eval or training_args.evaluate_during_training
@@ -268,6 +276,10 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
     )
+
+    # start by saving tokenizer so that we can restart training!
+    if trainer.is_world_master():
+        tokenizer.save_pretrained(training_args.output_dir)
 
     results = {}
     # Training
