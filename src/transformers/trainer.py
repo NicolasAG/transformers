@@ -681,7 +681,7 @@ class Trainer:
         if model_path is not None:
             # set global_step to global_step of last saved checkpoint from model path
             try:
-                self.global_step = int(model_path.split("-")[-1].split(os.path.sep)[0])
+                self.global_step = int(model_path.split("-")[-1].split(os.path.sep)[0].replace('_best', ''))
                 self.total_flos = getattr(model.config, "total_flos", 0)
 
                 epochs_trained = self.global_step // (len(train_dataloader) // self.args.gradient_accumulation_steps)

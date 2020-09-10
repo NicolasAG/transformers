@@ -289,11 +289,12 @@ def main():
         data_collator=data_collator,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        tokenizer=tokenizer,
     )
 
     # start by saving tokenizer so that we can restart training!
-    if trainer.is_world_master():
-        tokenizer.save_pretrained(training_args.output_dir)
+    # if trainer.is_world_master():
+    #     tokenizer.save_pretrained(training_args.output_dir)
 
     results = {}
     # Training
@@ -304,16 +305,27 @@ def main():
             else None
         )
         logger.info(f"model_path: {model_path}")
+        if model_path is not None:
+            # Grab the most recent checkpoint
+            checkpoints_sorted = trainer._sorted_checkpoints(use_mtime=True)
+            assert len(checkpoints_sorted) > 0
+            checkpoint_most_recent = checkpoints_sorted[-1]
+            logger.info(f"most recent checkpoint: {checkpoint_most_recent}. setting model_path to this.")
+            # TODO: find a way to set:
+            # - patience_best_eval_loss = None
+            # - patience_evals_without_improvement = 0
+            # - patience_should_stop = False
+            model_path = checkpoint_most_recent
         train_results = trainer.train(model_path=model_path, )
         results["train_step"] = train_results.global_step
         results["train_loss"] = train_results.training_loss
         results["train_ppl"] = math.exp(train_results.training_loss)
 
-        trainer.save_model()
+        # trainer.save_model()
         # For convenience, we also re-save the tokenizer to the same directory,
         # so that you can share your model easily on huggingface.co/models =)
-        if trainer.is_world_master():
-            tokenizer.save_pretrained(training_args.output_dir)
+        # if trainer.is_world_master():
+        #     tokenizer.save_pretrained(training_args.output_dir)
 
     # Evaluation
     if training_args.do_eval:
