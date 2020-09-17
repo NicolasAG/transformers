@@ -22,29 +22,29 @@ echo "done. now submitting job..."
 
 try=1
 
-for m1 in "lp" # "spr" "sp" "lp" "lpr" "np"
+for m1 in "np" # "spr" "sp" "lp" "lpr" "np"
 do
   if [ $m1 == "sp" ]
   then
     mode="short"
-    checkpoint="17280"
+    checkpoint="17280"  # facts (fs: # / ft: 17280) | amt (fs: # / ft: #)
   elif [ $m1 == "spr" ]
   then
     mode="short"
-    checkpoint="17820"
+    checkpoint="17820"  # facts (fs: # / ft: 17820) | amt (fs: # / ft: #)
   elif [ $m1 == "lp" ]
   then
     mode="long"
-    checkpoint="28080"
+    checkpoint="28080"  # facts (fs: # / ft: 28080) | amt (fs: # / ft: #)
   elif [ $m1 == "lpr" ]
   then
     mode="long"
-    checkpoint="unknown"
+    checkpoint="#####"  # facts (fs: # / ft: #) | amt (fs: # / ft: #)
   else
     mode="no"
-    checkpoint="14580"
+    checkpoint="19980"  # facts (fs: # / ft: 14580) | amt (fs: 19980 / ft: 20520)
   fi
-  for m2 in "facts" # "amt"
+  for m2 in "amt" # "facts" "amt"
   do
     for i in 2 3 4 5 6 7 8 9 10
     do
@@ -81,7 +81,8 @@ do
                         --out_file=/clutrr/1.${i}_test/hf-gpt2-pure_${mode}-proof_${m2}.txt
           "
       '
-      # FORWARD PROOFS
+      # FORWARD PROOFS & FINE-TUNED GPT
+      : '
       eai job submit \
           --image registry.console.elementai.com/$ACCOUNT_ID/allennlp \
           --data $ORG_NAME.$ACCOUNT_NAME.data_clutrr1:/clutrr \
@@ -104,7 +105,8 @@ do
                         --p=0.9 \
                         --out_file=/clutrr/1.${i}_test/hf-gpt2_anon_${mode}-proof_${m2}.txt
           "
-      # BACKWARD PROOFS
+      '
+      # BACKWARD PROOFS & FINE-TUNED GPT
       : '
       eai job submit \
           --image registry.console.elementai.com/$ACCOUNT_ID/allennlp \
@@ -130,6 +132,29 @@ do
                         --out_file=/clutrr/1.${i}_test/hf-gpt2_anon@${checkpoint}_${mode}-proof_${m2}.txt
           "
       '
+      # FORWARD PROOFS & FROM-SCRATCH GPT
+      eai job submit \
+          --image registry.console.elementai.com/$ACCOUNT_ID/allennlp \
+          --data $ORG_NAME.$ACCOUNT_NAME.data_clutrr1:/clutrr \
+          --data $ORG_NAME.$ACCOUNT_NAME.models_gpt2:/models \
+          --data $ORG_NAME.$ACCOUNT_NAME.$eai_code:/hf_transformers \
+          --cpu 1 \
+          --mem 8 \
+          --gpu 1 \
+          --gpu-mem 6 \
+          --name "generate_test_1o${i}_${m1}_${m2}_hfgpt2fs_${checkpoint}_try${try}" \
+          --restartable \
+          -- bash -c "cd hf_transformers/examples/text-generation \
+                      && python run_generation.py \
+                        --model_type=gpt2 \
+                        --model_name_or_path=/models/clutrr/1_${mode}-proof_${m2}_2_4_6/hf-gpt-fs_anon/checkpoint-${checkpoint}_best/ \
+                        --prompt=/clutrr/1.${i}_test/${mode}_proof_1.${i}_test_${m2}_ANON.txt \
+                        --length=${ml} \
+                        --temperature=0.7 \
+                        --k=30 \
+                        --p=0.9 \
+                        --out_file=/clutrr/1.${i}_test/hf-gpt2-fs_anon_${mode}-proof_${m2}.txt
+          "
       done
   done
 done

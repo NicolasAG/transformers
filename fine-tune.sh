@@ -21,9 +21,9 @@ do
 done
 echo "done. now submitting job..."
 
-try=35
+try=8
 
-for m1 in "lpr" # "np" "sp" "spr" "lp" "lpr"
+for m1 in "spr" "sp" # "np" "sp" "spr" "lp" "lpr"
 do
   if [ $m1 == "sp" ]
   then
@@ -47,10 +47,10 @@ do
     acc=16
   else
     mode="no-proof"
-    bs=8
-    acc=16
+    bs=16
+    acc=8
   fi
-  for m2 in "facts" # "facts" "amt"
+  for m2 in "amt" # "facts" "amt"
   do
     # FINETUNE
     eai job submit \
@@ -123,7 +123,7 @@ do
                       --dataloader_drop_last \
                       --prediction_loss_only
     "
-    '
+  '
   done
 done
 
