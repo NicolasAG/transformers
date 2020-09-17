@@ -682,7 +682,10 @@ class Trainer:
             # set global_step to global_step of last saved checkpoint from model path
             try:
                 self.global_step = int(model_path.split("-")[-1].split(os.path.sep)[0].replace('_best', ''))
-                self.total_flos = getattr(model.config, "total_flos", 0)
+                if isinstance(model, torch.nn.DataParallel):
+                    self.total_flos = getattr(model.module.config, "total_flos", 0)
+                else:
+                    self.total_flos = getattr(model.config, "total_flos", 0)
 
                 epochs_trained = self.global_step // (len(train_dataloader) // self.args.gradient_accumulation_steps)
                 steps_trained_in_current_epoch = self.global_step % (
