@@ -172,7 +172,6 @@ def main():
 
     parser.add_argument("--prompt", type=str, required=True, help="path to txt file with 1 prompt per line")
     parser.add_argument("--out_file", type=str, default=None, help="path to txt file to write generations to")
-    parser.add_argument("--prefix", type=str, default=None, help="path to txt file with a bunch of examples")
     parser.add_argument("--length", type=int, default=20)
     parser.add_argument("--stop_token", type=str, default=None, help="Token at which text generation is stopped")
 
@@ -188,7 +187,8 @@ def main():
     parser.add_argument("--k", type=int, default=0)
     parser.add_argument("--p", type=float, default=0.9)
 
-    parser.add_argument("--prefix", type=str, default="", help="Text added prior to input.")
+    # parser.add_argument("--prefix", type=str, default="", help="Text added prior to input.")
+    parser.add_argument("--prefix", type=str, default=None, help="path to txt file with a bunch of examples")
     parser.add_argument("--padding_text", type=str, default="", help="Deprecated, the use of `--prefix` is preferred.")
     parser.add_argument("--xlm_language", type=str, default="", help="Optional language when used with the XLM model.")
 
